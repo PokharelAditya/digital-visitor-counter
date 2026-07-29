@@ -99,30 +99,13 @@ static bool read_ir2_triggered(void)
     return false;
 }
 
-/* ====================================================================
-   Actuators
-   ==================================================================== */
-static void beep_short(void)
-{
-    gpio_set_level(BUZZER_PIN, 1);
-    vTaskDelay(pdMS_TO_TICKS(BEEP_SHORT_MS));
-    gpio_set_level(BUZZER_PIN, 0);
-}
-
-static void beep_alarm(void)
-{
-    for (int i = 0; i < 3; i++) {
-        gpio_set_level(BUZZER_PIN, 1); vTaskDelay(pdMS_TO_TICKS(150));
-        gpio_set_level(BUZZER_PIN, 0); vTaskDelay(pdMS_TO_TICKS(100));
-    }
-}
+/* Buzzer removed — no actuator functions needed */
 
 /* ====================================================================
    Event handler — called after each confirmed ENTRY or EXIT
    ==================================================================== */
 static void on_event(const char *type)
 {
-    beep_short();
 
     char ts[32];
     time_t epoch = 0;
@@ -157,7 +140,6 @@ static void on_event(const char *type)
     }
 #endif
 
-    if (snap.room_full) beep_alarm();
 }
 
 /* ====================================================================
@@ -355,17 +337,16 @@ static void gpio_init_all(void)
     };
     gpio_config(&btn_cfg);
 
-    /* LED + buzzer: outputs, start LOW */
+    /* LED: output, start LOW */
     gpio_config_t out_cfg = {
-        .pin_bit_mask = (1ULL << LED_PIN) | (1ULL << BUZZER_PIN),
+        .pin_bit_mask = (1ULL << LED_PIN),
         .mode         = GPIO_MODE_OUTPUT,
         .pull_up_en   = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type    = GPIO_INTR_DISABLE,
     };
     gpio_config(&out_cfg);
-    gpio_set_level(LED_PIN,    0);
-    gpio_set_level(BUZZER_PIN, 0);
+    gpio_set_level(LED_PIN, 0);
 
     /* Install ISR service and attach per-pin handlers */
     gpio_install_isr_service(0);

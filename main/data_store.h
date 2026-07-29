@@ -1,4 +1,5 @@
 #pragma once
+#include "config.h"   /* pulls in LOG_FILE_PATH, LOG_MAX_BYTES, ENABLE_LOCAL_LOG, etc. */
 #include <stdint.h>
 #include <stdbool.h>
 #include <time.h>

@@ -1,4 +1,5 @@
 #pragma once
+#include "config.h"   /* pulls in LOG_JSON_MAX_ROWS and all feature toggles */
 #include <stdint.h>
 #include <stdbool.h>
 #include <time.h>
