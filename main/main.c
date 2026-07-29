@@ -27,6 +27,19 @@
 #include "wifi_manager.h"
 #include "web_server.h"
 
+/* ====================================================================
+   Cloud event queue — decouples the fast FSM task from slow HTTP calls
+   ==================================================================== */
+typedef struct {
+    char type[8];        /* "ENTRY" or "EXIT" */
+    char ts[32];         /* timestamp string  */
+    time_t epoch;
+    counter_state_t snap;
+} cloud_event_t;
+
+#define CLOUD_QUEUE_LEN 8
+static QueueHandle_t s_cloud_queue = NULL;
+
 static const char *TAG = "main";
 
 /* ====================================================================
@@ -106,7 +119,6 @@ static bool read_ir2_triggered(void)
    ==================================================================== */
 static void on_event(const char *type)
 {
-
     char ts[32];
     time_t epoch = 0;
     bool have_time = wifi_manager_get_timestamp(ts, sizeof(ts), &epoch);
@@ -126,20 +138,28 @@ static void on_event(const char *type)
         storage_save_counters(g_state.entries, g_state.exits, g_state.max_capacity);
         s_events_since_save = 0;
     }
-    counter_state_t snap = g_state;   /* local copy for cloud calls */
+    counter_state_t snap = g_state;
     xSemaphoreGive(g_state_mutex);
 
+    /* Log to SPIFFS immediately (fast, local flash write) */
 #if ENABLE_LOCAL_LOG
     log_append(type, ts, snap.entries, snap.exits, snap.occupancy);
 #endif
 
-#if ENABLE_FIREBASE
-    if (wifi_manager_is_connected()) {
-        firebase_push_event(type, ts, epoch, &snap);
-        firebase_push_status(&snap);
+    /* Cloud calls go to the queue — FSM task returns instantly */
+    if (s_cloud_queue && wifi_manager_is_connected()) {
+        cloud_event_t ev;
+        strncpy(ev.type, type, sizeof(ev.type) - 1);
+        ev.type[sizeof(ev.type) - 1] = '\0';
+        strncpy(ev.ts, ts, sizeof(ev.ts) - 1);
+        ev.ts[sizeof(ev.ts) - 1] = '\0';
+        ev.epoch = epoch;
+        ev.snap  = snap;
+        /* Non-blocking: if queue is full, drop the event rather than stall */
+        if (xQueueSend(s_cloud_queue, &ev, 0) != pdTRUE) {
+            ESP_LOGW(TAG, "Cloud queue full — event dropped.");
+        }
     }
-#endif
-
 }
 
 /* ====================================================================
@@ -270,6 +290,40 @@ static void serial_console_task(void *arg)
 }
 
 /* ====================================================================
+   Cloud task — drains the cloud_event queue and pushes to Firebase /
+   ThingSpeak. Runs on core 0 at low priority so HTTP timeouts never
+   block the sensor FSM (which runs on core 1 at high priority).
+   ==================================================================== */
+static void cloud_task(void *arg)
+{
+    cloud_event_t ev;
+    uint32_t last_ts_push_ms = 0;
+
+    while (1) {
+        /* Block up to 1 s waiting for an event */
+        if (xQueueReceive(s_cloud_queue, &ev, pdMS_TO_TICKS(1000)) == pdTRUE) {
+#if ENABLE_FIREBASE
+            firebase_push_event(ev.type, ev.ts, ev.epoch, &ev.snap);
+            firebase_push_status(&ev.snap);
+#endif
+            last_ts_push_ms = millis();
+        }
+
+        /* ThingSpeak: interval-based, no event needed */
+#if ENABLE_THINGSPEAK
+        if (wifi_manager_is_connected() &&
+            millis() - last_ts_push_ms > THINGSPEAK_INTERVAL_MS) {
+            last_ts_push_ms = millis();
+            xSemaphoreTake(g_state_mutex, portMAX_DELAY);
+            counter_state_t snap = g_state;
+            xSemaphoreGive(g_state_mutex);
+            thingspeak_push(&snap);
+        }
+#endif
+    }
+}
+
+/* ====================================================================
    Sensor + FSM task (core 1)
    ==================================================================== */
 static void sensor_task(void *arg)
@@ -297,16 +351,7 @@ static void sensor_task(void *arg)
             }
         }
 
-#if ENABLE_THINGSPEAK
-        if (wifi_manager_is_connected() &&
-            millis() - s_last_thingspeak_ms > THINGSPEAK_INTERVAL_MS) {
-            s_last_thingspeak_ms = millis();
-            xSemaphoreTake(g_state_mutex, portMAX_DELAY);
-            counter_state_t snap = g_state;
-            xSemaphoreGive(g_state_mutex);
-            thingspeak_push(&snap);
-        }
-#endif
+        /* ThingSpeak is interval-based, also handled by cloud_task */
 
         vTaskDelay(pdMS_TO_TICKS(5));  /* yield CPU, ~200 Hz FSM update rate */
     }
@@ -393,9 +438,14 @@ void app_main(void)
 
     ESP_LOGI(TAG, "Type HELP for admin commands.");
 
-    /* 6. Start FreeRTOS tasks */
+    /* 6. Create cloud event queue */
+    s_cloud_queue = xQueueCreate(CLOUD_QUEUE_LEN, sizeof(cloud_event_t));
+    configASSERT(s_cloud_queue);
+
+    /* 7. Start FreeRTOS tasks */
     xTaskCreatePinnedToCore(sensor_task,        "sensor",  4096, NULL, 10, NULL, 1);
     xTaskCreatePinnedToCore(serial_console_task,"serial",  4096, NULL,  5, NULL, 0);
+    xTaskCreatePinnedToCore(cloud_task,         "cloud",   8192, NULL,  4, NULL, 0);
 
     /* app_main returns here — RTOS scheduler takes over */
 }

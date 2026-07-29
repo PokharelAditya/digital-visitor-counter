@@ -234,7 +234,7 @@ static bool firebase_request(const char *method, const char *path, const char *j
         .transport_type          = HTTP_TRANSPORT_OVER_SSL,
         .skip_cert_common_name_check = true,  /* matches original setInsecure() */
         .crt_bundle_attach       = esp_crt_bundle_attach,
-        .timeout_ms              = 8000,
+        .timeout_ms              = 4000,   /* fail fast on no-internet networks */
     };
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     if (!client) return false;
