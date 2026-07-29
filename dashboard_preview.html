@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<!--
+  This is the SAME dashboard that is embedded inside VisitorCounter.ino
+  (as the DASHBOARD_HTML string) and served directly by the ESP32 at
+  http://<device-ip>/  once it is connected to Wi-Fi.
+
+  This standalone copy is only for previewing / editing the look of the
+  dashboard on your computer before pasting changes back into the .ino
+  file. Opening it directly in a browser will show "--" and an empty
+  log table because there is no ESP32 at /status or /log in this
+  context — that's expected.
+
+  To test it against a REAL device: change API_BASE below to your
+  ESP32's IP address, e.g. "http://192.168.1.42", then open this file
+  in a browser (as long as your PC is on the same Wi-Fi network).
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Visitor Counter Dashboard (Preview)</title>
+<style>
+  body{font-family:Arial,Helvetica,sans-serif;background:#0f172a;color:#e2e8f0;
+       display:flex;flex-direction:column;align-items:center;padding:30px;margin:0;}
+  h1{color:#38bdf8;margin-bottom:4px;}
+  .sub{color:#94a3b8;margin-bottom:24px;font-size:14px;}
+  .cards{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;}
+  .card{background:#1e293b;border-radius:14px;padding:22px 30px;min-width:140px;
+        text-align:center;box-shadow:0 4px 14px rgba(0,0,0,0.35);}
+  .card .label{font-size:13px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;}
+  .card .value{font-size:38px;font-weight:bold;margin-top:6px;}
+  .in .value{color:#4ade80;} .out .value{color:#f87171;} .occ .value{color:#38bdf8;}
+  .status{margin-top:22px;padding:10px 22px;border-radius:20px;font-weight:bold;}
+  .status.ok{background:#14532d;color:#4ade80;}
+  .status.full{background:#7f1d1d;color:#fca5a5;}
+  .bar-wrap{width:280px;background:#1e293b;border-radius:10px;height:18px;margin-top:20px;overflow:hidden;}
+  .bar{height:100%;background:linear-gradient(90deg,#38bdf8,#f87171);width:0%;transition:width .4s;}
+  .btnrow{display:flex;gap:10px;margin-top:26px;flex-wrap:wrap;justify-content:center;}
+  button{background:#334155;color:#e2e8f0;border:none;padding:10px 22px;
+         border-radius:8px;cursor:pointer;font-size:14px;}
+  button:hover{background:#475569;}
+  table{margin-top:30px;border-collapse:collapse;width:min(600px,92vw);font-size:13px;}
+  th,td{padding:8px 10px;text-align:left;border-bottom:1px solid #1e293b;}
+  th{color:#94a3b8;text-transform:uppercase;font-size:11px;letter-spacing:.5px;}
+  td.type-ENTRY{color:#4ade80;font-weight:bold;}
+  td.type-EXIT{color:#f87171;font-weight:bold;}
+  .logtitle{margin-top:10px;color:#94a3b8;font-size:13px;}
+  .note{margin-top:30px;font-size:12px;color:#64748b;max-width:340px;text-align:center;}
+</style>
+</head>
+<body>
+  <h1>Digital Visitor Counter</h1>
+  <div class="sub">Live occupancy dashboard — ESP32</div>
+  <div class="cards">
+    <div class="card in"><div class="label">Entries</div><div class="value" id="entries">--</div></div>
+    <div class="card out"><div class="label">Exits</div><div class="value" id="exits">--</div></div>
+    <div class="card occ"><div class="label">Occupancy</div><div class="value" id="occupancy">--</div></div>
+  </div>
+  <div class="bar-wrap"><div class="bar" id="bar"></div></div>
+  <div class="status ok" id="status">OK</div>
+  <div class="btnrow">
+    <button onclick="resetCounters()">Reset Counters</button>
+    <button onclick="location.href=API_BASE+'/export'">Download Log (CSV)</button>
+  </div>
+
+  <div class="logtitle">Recent entry / exit log</div>
+  <table>
+    <thead><tr><th>Time</th><th>Type</th><th>Occupancy</th></tr></thead>
+    <tbody id="logbody"><tr><td colspan="3">Loading...</td></tr></tbody>
+  </table>
+
+  <div class="note">Set API_BASE in this file's &lt;script&gt; to your ESP32's IP
+  (e.g. http://192.168.1.42) to see live data and log history here.</div>
+
+<script>
+const API_BASE = ""; // e.g. "http://192.168.1.42"  (leave "" when embedded ON the ESP32 itself)
+
+async function refresh(){
+  try{
+    const r = await fetch(API_BASE + '/status');
+    const d = await r.json();
+    document.getElementById('entries').textContent = d.entries;
+    document.getElementById('exits').textContent = d.exits;
+    document.getElementById('occupancy').textContent = d.occupancy;
+    const pct = Math.min(100, (d.occupancy / d.maxCapacity) * 100);
+    document.getElementById('bar').style.width = pct + '%';
+    const st = document.getElementById('status');
+    if(d.full){ st.textContent = 'ROOM FULL'; st.className='status full'; }
+    else { st.textContent = 'OK  (' + d.occupancy + ' / ' + d.maxCapacity + ')'; st.className='status ok'; }
+  }catch(e){ console.log('fetch failed (expected if no ESP32 configured)', e); }
+}
+
+async function refreshLog(){
+  try{
+    const r = await fetch(API_BASE + '/log');
+    const rows = await r.json();
+    const body = document.getElementById('logbody');
+    if(!rows.length){ body.innerHTML = '<tr><td colspan="3">No events yet.</td></tr>'; return; }
+    body.innerHTML = rows.slice().reverse().map(e =>
+      `<tr><td>${e.timestamp}</td><td class="type-${e.type}">${e.type}</td><td>${e.occupancy}</td></tr>`
+    ).join('');
+  }catch(e){ console.log('log fetch failed (expected if no ESP32 configured)', e); }
+}
+
+function resetCounters(){
+  if(confirm('Reset entry/exit counters?')){
+    fetch(API_BASE + '/reset').then(()=>{refresh(); refreshLog();});
+  }
+}
+
+setInterval(refresh, 1000);
+setInterval(refreshLog, 3000);
+refresh();
+refreshLog();
+</script>
+</body>
+</html>

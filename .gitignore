@@ -1,0 +1,22 @@
+# Secrets
+config.h
+
+# Arduino temporary files
+*.ino.cpp
+*.ino.bin
+*.elf
+*.hex
+
+# Build folders
+build/
+dist/
+
+# VS Code
+.vscode/
+
+# PlatformIO
+.pio/
+.vscode/
+
+# macOS
+.DS_Store
