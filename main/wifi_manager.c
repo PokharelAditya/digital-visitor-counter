@@ -105,9 +105,9 @@ void wifi_manager_sync_ntp(void)
     setenv("TZ", "NPT-5:45", 1);
     tzset();
 
-    sntp_setoperatingmode(SNTP_OPMODE_POLL);
-    sntp_setservername(0, NTP_SERVER);
-    sntp_init();
+    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    esp_sntp_setservername(0, NTP_SERVER);
+    esp_sntp_init();
 
     ESP_LOGI(TAG, "Waiting for NTP sync...");
     for (int i = 0; i < 20; i++) {

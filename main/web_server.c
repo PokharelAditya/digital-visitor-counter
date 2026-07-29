@@ -16,6 +16,7 @@
 #include "esp_http_server.h"
 #include "esp_http_client.h"
 #include "esp_tls.h"
+#include "esp_crt_bundle.h"   /* required for esp_crt_bundle_attach() */
 
 static const char *TAG = "web_server";
 
