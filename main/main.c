@@ -193,11 +193,19 @@ static void update_fsm(void)
 
         case FSM_IR2_TRIGGERED:   /* waiting for IR1 → EXIT */
             if (ir1) {
-                g_state.exits++;
-                if (g_state.occupancy > 0) g_state.occupancy--;
                 s_fsm = FSM_IDLE;
+                if (g_state.occupancy > 0) {
+                    /* Real exit: someone was actually inside to leave. */
+                    g_state.exits++;
+                    g_state.occupancy--;
+                    xSemaphoreGive(g_state_mutex);
+                    on_event("EXIT");
+                    return;
+                }
+                /* occupancy already 0 — sensor bounce / false retrigger.
+                   Don't count it, so exits can never exceed entries. */
+                ESP_LOGW(TAG, "[FSM] Exit ignored — occupancy already 0 (bounce?)");
                 xSemaphoreGive(g_state_mutex);
-                on_event("EXIT");
                 return;
             } else if (millis() - s_first_trig > EVENT_TIMEOUT_MS) {
                 s_fsm = FSM_IDLE;
